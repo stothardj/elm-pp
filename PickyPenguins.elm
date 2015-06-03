@@ -52,7 +52,7 @@ be an empty list (no objects at the start):
 
 type GameColor = Red | Green | Blue
 
-type BoxAction = Move | Disappear
+type BoxAction = BoxMove | BoxDisappear
 
 type alias Positioned a = { a | x : Int, y : Int}
 
@@ -113,6 +113,7 @@ Task: redefine `stepGame` to use the UserInput and GameState
 
 numFrames = 5
 
+occupiesSameSpot : Positioned a -> Positioned b -> Bool
 occupiesSameSpot p1 p2 = p1.x == p2.x && p1.y == p2.y
 
 inBounds : Dimensions -> Box -> Bool
@@ -124,17 +125,23 @@ clearOfPositioned xs box = xs
                  |> List.filter (occupiesSameSpot box)
                  |> List.isEmpty
 
+reachedGoal : List Goal -> Box -> Bool
+reachedGoal goals box = goals
+                      |> List.filter (occupiesSameSpot box)
+                      |> List.map .color
+                      |> List.member box.color
+
 determineBoxAction : GameState -> Box -> List BoxAction
 determineBoxAction gameState box =
     let movedBox = moveBox gameState.direction box
-    in if | not <| clearOfPositioned gameState.goals box -> [Disappear]
+    in if | reachedGoal gameState.goals box -> [BoxDisappear]
           | not <| inBounds gameState.dimensions movedBox -> []
           | not <| clearOfPositioned gameState.walls movedBox -> []
           | not <| clearOfPositioned gameState.boxes movedBox -> []
-          | otherwise -> [Move]
+          | otherwise -> [BoxMove]
 
-applyBoxAction : GameState -> Box -> Box
-applyBoxAction gameState box = { box | boxActions <- determineBoxAction gameState box}
+tagBoxAction : GameState -> Box -> Box
+tagBoxAction gameState box = { box | boxActions <- determineBoxAction gameState box}
 
 moveBox : Direction -> Box -> Box
 moveBox {dx,dy} ({x,y} as box) =
@@ -148,12 +155,13 @@ comp f x = not (f x)
 
 determineActions : GameState -> GameState
 determineActions gameState =
-    { gameState | boxes <- List.map (applyBoxAction gameState) gameState.boxes }
+    { gameState | boxes <- List.map (tagBoxAction gameState) gameState.boxes }
 
 applyActions : GameState -> GameState
 applyActions gameState =
-    let mobile = List.filter (List.member Move << .boxActions) gameState.boxes
-        immobile = List.filter ((List.member Move << .boxActions) |> comp) gameState.boxes
+    let remaining = List.filter (comp (List.member BoxDisappear) << .boxActions) gameState.boxes
+        mobile = List.filter (List.member BoxMove << .boxActions) remaining
+        immobile = List.filter ((List.member BoxMove << .boxActions) |> comp) remaining
     in { gameState | boxes <- immobile ++ List.map (moveBox gameState.direction) mobile,
                      direction <- if List.isEmpty mobile then still else gameState.direction }
 
@@ -222,7 +230,7 @@ tweenVec {dx,dy} (cellWidth,cellHeight) frame =
     (dx * cellWidth * frame // numFrames, dy * cellHeight * frame // numFrames) |> tupFloat
 
 tweenBox cellDim box gameState element =
-    if List.member Move box.boxActions
+    if List.member BoxMove box.boxActions
     then move (tweenVec gameState.direction cellDim gameState.frame) element
     else element
 
