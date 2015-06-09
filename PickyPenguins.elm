@@ -53,15 +53,16 @@ be an empty list (no objects at the start):
 type GameColor = Red | Green | Blue
 
 type BoxAction = BoxMove | BoxDisappear
+type GoalAction = GoalDisappear
 
 type alias Positioned a = { a | x : Int, y : Int}
+type alias Colored a = { a | color : GameColor}
 
-type alias Box = Positioned
-    { color : GameColor
-    , boxActions : List BoxAction}
+type alias Box = Positioned (Colored
+    { boxActions : List BoxAction})
 
-type alias Goal = Positioned
-    { color : GameColor}
+type alias Goal = Positioned (Colored
+    { goalActions : List GoalAction})
 
 type alias Wall = Positioned
     {}
@@ -92,7 +93,7 @@ defaultGame =
               , {x = 6, y = 6, color = Green, boxActions = []}
               , {x = 4, y = 8, color = Red, boxActions = []}
               , {x = 4, y = 6, color = Green, boxActions = []}]
-    , goals = [ {x = 5, y = 5, color = Red}]
+    , goals = [ {x = 5, y = 5, color = Red, goalActions = []}]
     , walls = [ {x = 3, y = 9}
               , {x = 1, y = 2}
               , {x = 6, y = 9}]
@@ -111,7 +112,7 @@ Task: redefine `stepGame` to use the UserInput and GameState
 
 ------------------------------------------------------------------------------}
 
-numFrames = 5
+numFrames = 3
 
 occupiesSameSpot : Positioned a -> Positioned b -> Bool
 occupiesSameSpot p1 p2 = p1.x == p2.x && p1.y == p2.y
@@ -125,7 +126,8 @@ clearOfPositioned xs box = xs
                  |> List.filter (occupiesSameSpot box)
                  |> List.isEmpty
 
-reachedGoal : List Goal -> Box -> Bool
+-- Generic such that a list of goals can be passed for the box or a list of boxes can be found for the goal.
+reachedGoal : List (Colored (Positioned a)) -> (Colored (Positioned b)) -> Bool
 reachedGoal goals box = goals
                       |> List.filter (occupiesSameSpot box)
                       |> List.map .color
@@ -143,27 +145,40 @@ determineBoxAction gameState box =
 tagBoxAction : GameState -> Box -> Box
 tagBoxAction gameState box = { box | boxActions <- determineBoxAction gameState box}
 
+determineGoalAction : GameState -> Goal -> List GoalAction
+determineGoalAction gameState goal =
+    if reachedGoal gameState.boxes goal then [GoalDisappear] else []
+
+tagGoalAction : GameState -> Goal -> Goal
+tagGoalAction gameState goal = { goal | goalActions <- determineGoalAction gameState goal}
+       
 moveBox : Direction -> Box -> Box
 moveBox {dx,dy} ({x,y} as box) =
-    { box |
-            x <- x + dx,
-            y <- y + dy
-    }
+    { box | x <- x + dx,
+            y <- y + dy}
 
 comp : (a -> Bool) -> a -> Bool
 comp f x = not (f x)
 
 determineActions : GameState -> GameState
 determineActions gameState =
-    { gameState | boxes <- List.map (tagBoxAction gameState) gameState.boxes }
+    { gameState | boxes <- List.map (tagBoxAction gameState) gameState.boxes,
+                  goals <- List.map (tagGoalAction gameState) gameState.goals}
 
-applyActions : GameState -> GameState
-applyActions gameState =
+applyBoxActions : GameState -> GameState
+applyBoxActions gameState =
     let remaining = List.filter (comp (List.member BoxDisappear) << .boxActions) gameState.boxes
         mobile = List.filter (List.member BoxMove << .boxActions) remaining
         immobile = List.filter ((List.member BoxMove << .boxActions) |> comp) remaining
-    in { gameState | boxes <- immobile ++ List.map (moveBox gameState.direction) mobile,
-                     direction <- if List.isEmpty mobile then still else gameState.direction }
+    in {gameState | boxes <- immobile ++ List.map (moveBox gameState.direction) mobile,
+                    direction <- if List.isEmpty mobile then still else gameState.direction}
+
+applyGoalActions : GameState -> GameState
+applyGoalActions gameState =
+    {gameState | goals <- List.filter (comp (List.member GoalDisappear) << .goalActions) gameState.goals}
+
+applyActions : GameState -> GameState
+applyActions gameState = gameState |> applyBoxActions |> applyGoalActions
 
 tryChangeDirection : UserInput -> GameState -> GameState
 tryChangeDirection input gameState =
