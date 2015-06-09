@@ -4,7 +4,7 @@ import Graphics.Element exposing (..)
 import Time
 import Window
 import Keyboard
-
+import Signal exposing ((<~),(~))
 
 {-- Part 1: Model the user input ----------------------------------------------
 
@@ -21,18 +21,9 @@ type alias UserInput =
     , dy : Int}
 
 userInput : Signal UserInput
-userInput =
-    Signal.map2 UserInput
-          (Signal.map .x Keyboard.arrows)
-          (Signal.map .y Keyboard.arrows)
+userInput = UserInput <~ (.x <~ Keyboard.arrows) ~ (.y <~ Keyboard.arrows)
 
-
-type alias Input =
-    { timeDelta : Float
-    , userInput : UserInput
-    }
-
-
+type Input = TimeDelta Float | UserAction UserInput
 
 {-- Part 2: Model the game ----------------------------------------------------
 
@@ -112,7 +103,7 @@ Task: redefine `stepGame` to use the UserInput and GameState
 
 ------------------------------------------------------------------------------}
 
-numFrames = 3
+numFrames = 8
 
 occupiesSameSpot : Positioned a -> Positioned b -> Bool
 occupiesSameSpot p1 p2 = p1.x == p2.x && p1.y == p2.y
@@ -186,22 +177,20 @@ tryChangeDirection input gameState =
       then { gameState | direction <- input }
       else gameState
 
-stepGameObjects : Input -> GameState -> GameState
-stepGameObjects {timeDelta,userInput} gameState =
-    gameState
-        |> applyActions
-        |> tryChangeDirection userInput
-        |> determineActions
-
 stepFrame : GameState -> GameState
 stepFrame gameState =
     if gameState.direction == still
     then gameState
     else { gameState | frame <- (gameState.frame + 1) % numFrames}
 
+gameNeedsStep : GameState -> Bool
+gameNeedsStep gameState = True
+
 stepGame : Input -> GameState -> GameState
 stepGame input gameState =
-    (if gameState.frame == numFrames - 1 then stepGameObjects input gameState else gameState) |> stepFrame
+    case input of
+      TimeDelta _ -> if gameState.frame == numFrames - 1 then applyActions gameState |> determineActions else gameState |> stepFrame
+      UserAction userInput -> gameState |> tryChangeDirection userInput |> determineActions
 
 {-- Part 4: Display the game --------------------------------------------------
 
@@ -265,8 +254,6 @@ display (w,h) gameState =
                     ++ List.map (displayWall cellDim) gameState.walls
                     ++ List.map (displayGoal cellDim) gameState.goals)
 
-
-
 {-- That's all folks! ---------------------------------------------------------
 
 The following code puts it all together and shows it on screen.
@@ -274,20 +261,14 @@ The following code puts it all together and shows it on screen.
 ------------------------------------------------------------------------------}
 
 delta : Signal Float
-delta =
-    Time.fps 30
-
+delta = Time.fps 30
 
 input : Signal Input
-input =
-    Signal.sampleOn delta (Signal.map2 Input delta userInput)
-
+input = Signal.merge (TimeDelta <~ delta) (UserAction <~ userInput)
 
 gameState : Signal GameState
 gameState =
     Signal.foldp stepGame defaultGame input
 
-
 main : Signal Element
-main =
-    Signal.map2 display Window.dimensions gameState
+main = display <~ Window.dimensions ~ gameState
