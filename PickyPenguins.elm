@@ -5,7 +5,8 @@ import Time
 import Window
 import Keyboard
 import Signal exposing ((<~),(~))
-
+import Json.Decode as Json exposing ((:=),Decoder)
+    
 {-- Part 1: Model the user input ----------------------------------------------
 
 What information do you need to represent all relevant user input?
@@ -52,11 +53,22 @@ type alias Colored a = { a | color : GameColor}
 type alias Box = Positioned (Colored
     { boxActions : List BoxAction})
 
+makeBox : Int -> Int -> GameColor -> Box
+makeBox x y color =
+    {x = x, y = y, color = color, boxActions = []}
+
 type alias Goal = Positioned (Colored
     { goalActions : List GoalAction})
 
+makeGoal : Int -> Int -> GameColor -> Goal
+makeGoal x y color =
+    {x = x, y = y, color = color, goalActions = []}
+
 type alias Wall = Positioned
     {}
+
+makeWall : Int -> Int -> Wall
+makeWall x y = {x = x, y = y}
 
 type alias Direction =
     { dx : Int
@@ -65,6 +77,19 @@ type alias Direction =
 type alias Dimensions =
     { dimx : Int
     , dimy : Int}
+
+makeDimensions : Int -> Int -> Dimensions
+makeDimensions dimx dimy = {dimx = dimx, dimy = dimy}
+
+type alias Level =
+    { boxes : List Box
+    , goals : List Goal
+    , walls : List Wall
+    , dimensions : Dimensions}
+
+makeLevel : List Box -> List Goal -> List Wall -> Dimensions -> Level
+makeLevel boxes goals walls dimensions =
+    {boxes = boxes, goals = goals, walls = walls, dimensions = dimensions}
 
 type alias GameState =
     { boxes : List Box
@@ -77,20 +102,60 @@ type alias GameState =
 still : Direction
 still = { dx = 0, dy = 0}
 
-defaultGame : GameState
-defaultGame =
-    { boxes = [ {x = 3, y = 5, color = Red, boxActions = []}
-              , {x = 1, y = 9, color = Blue, boxActions = []}
-              , {x = 6, y = 6, color = Green, boxActions = []}
-              , {x = 4, y = 8, color = Red, boxActions = []}
-              , {x = 4, y = 6, color = Green, boxActions = []}]
-    , goals = [ {x = 5, y = 5, color = Red, goalActions = []}]
-    , walls = [ {x = 3, y = 9}
-              , {x = 1, y = 2}
-              , {x = 6, y = 9}]
-    , direction = still
-    , dimensions = {dimx = 10, dimy = 12}
-    , frame = numFrames - 1}
+levelString : String
+levelString = "{\"boxes\": [{\"x\": 3, \"y\": 5, \"color\": \"red\"}], \"goals\": [{\"x\" : 6, \"y\": 1, \"color\": \"green\"}], \"walls\": [{\"x\" : 2, \"y\": 3}], \"dimensions\": {\"width\": 10, \"height\": 20}}"
+
+stringToColor : String -> GameColor
+stringToColor s =
+    if | s == "red" -> Red
+       | s == "green" -> Green
+       | s == "blue" -> Blue
+
+colorDecoder : Decoder GameColor
+colorDecoder = Json.map stringToColor Json.string
+
+boxDecoder : Decoder Box
+boxDecoder = Json.object3 makeBox
+             ("x" := Json.int)
+             ("y" := Json.int)
+             ("color" := colorDecoder)
+
+goalDecoder : Decoder Goal
+goalDecoder = Json.object3 makeGoal
+              ("x" := Json.int)
+              ("y" := Json.int)
+              ("color" := colorDecoder)
+
+wallDecoder : Decoder Wall
+wallDecoder = Json.object2 makeWall
+              ("x" := Json.int)
+              ("y" := Json.int)
+
+dimensionsDecoder : Decoder Dimensions
+dimensionsDecoder = Json.object2 makeDimensions
+                    ("width" := Json.int)
+                    ("height" := Json.int)
+
+levelDecoder : Decoder Level
+levelDecoder = Json.object4 makeLevel
+               ("boxes" := Json.list boxDecoder)
+               ("goals" := Json.list goalDecoder)
+               ("walls" := Json.list wallDecoder)
+               ("dimensions" := dimensionsDecoder)
+
+level : Result String Level
+level = Json.decodeString levelDecoder levelString
+        
+defaultGame : Result String GameState
+defaultGame = case level of
+                Ok l -> Ok
+                        { boxes = l.boxes
+                        , goals = l.goals
+                        , walls = l.walls
+                        , dimensions = l.dimensions
+                        , direction = still
+                        , frame = numFrames - 1}
+                Err msg -> Err msg
 
 
 {-- Part 3: Update the game ---------------------------------------------------
@@ -183,14 +248,14 @@ stepFrame gameState =
     then gameState
     else { gameState | frame <- (gameState.frame + 1) % numFrames}
 
-gameNeedsStep : GameState -> Bool
-gameNeedsStep gameState = True
-
 stepGame : Input -> GameState -> GameState
 stepGame input gameState =
     case input of
       TimeDelta _ -> if gameState.frame == numFrames - 1 then applyActions gameState |> determineActions else gameState |> stepFrame
       UserAction userInput -> gameState |> tryChangeDirection userInput |> determineActions
+
+stepResultGame : Input -> Result String GameState -> Result String GameState
+stepResultGame input = Result.map (stepGame input)
 
 {-- Part 4: Display the game --------------------------------------------------
 
@@ -242,10 +307,8 @@ displayWall cellDim wall = cellDim |> irect |> filled wallColor |> move (cellPos
 
 displayGoal cellDim goal = cellDim |> tupFloat |> uncurry oval |> filled (dispColor goal.color) |> move (cellPosition cellDim goal |> tupFloat)
 
-display : (Int,Int) -> GameState -> Element
--- display (w,h) gameState =
---     show gameState
-display (w,h) gameState = 
+displayGame : (Int,Int) -> GameState -> Element
+displayGame (w,h) gameState =
     let cellDim = cellDimensions gameState.dimensions
     in container w h middle <|
        collage gameWidth gameHeight
@@ -253,6 +316,14 @@ display (w,h) gameState =
                     ++ List.map (\ b -> displayBox cellDim b |> tweenBox cellDim b gameState) gameState.boxes
                     ++ List.map (displayWall cellDim) gameState.walls
                     ++ List.map (displayGoal cellDim) gameState.goals)
+
+display : (Int,Int) -> Result String GameState -> Element
+-- display (w,h) gameState =
+--     show gameState
+display dim gameResultState =
+    case gameResultState of
+      Ok gameState -> displayGame dim gameState
+      Err msg -> show msg
 
 {-- That's all folks! ---------------------------------------------------------
 
@@ -266,9 +337,9 @@ delta = Time.fps 30
 input : Signal Input
 input = Signal.merge (TimeDelta <~ delta) (UserAction <~ userInput)
 
-gameState : Signal GameState
+gameState : Signal (Result String GameState)
 gameState =
-    Signal.foldp stepGame defaultGame input
+    Signal.foldp stepResultGame defaultGame input
 
 main : Signal Element
 main = display <~ Window.dimensions ~ gameState
