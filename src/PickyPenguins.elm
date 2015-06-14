@@ -6,15 +6,10 @@ import Window
 import Keyboard
 import Signal exposing ((<~),(~))
 import Json.Decode as Json exposing ((:=),Decoder)
-    
-{-- Part 1: Model the user input ----------------------------------------------
+import Http
+import Task exposing (Task, andThen)
 
-What information do you need to represent all relevant user input?
-
-Task: Redefine `UserInput` to include all of the information you need.
-      Redefine `userInput` to be a signal that correctly models the user
-      input as described by `UserInput`.
-
+{-- Input Model --------------------------------------------------------------
 ------------------------------------------------------------------------------}
 
 type alias UserInput =
@@ -24,22 +19,9 @@ type alias UserInput =
 userInput : Signal UserInput
 userInput = UserInput <~ (.x <~ Keyboard.arrows) ~ (.y <~ Keyboard.arrows)
 
-type Input = TimeDelta Float | UserAction UserInput
+type Input = TimeDelta Float | UserAction UserInput | LevelLoaded Level
 
-{-- Part 2: Model the game ----------------------------------------------------
-
-What information do you need to represent the entire game?
-
-Tasks: Redefine `GameState` to represent your particular game.
-       Redefine `defaultGame` to represent your initial game state.
-
-For example, if you want to represent many objects that just have a position,
-your GameState might just be a list of coordinates and your default game might
-be an empty list (no objects at the start):
-
-    type GameState = { objects : [(Float,Float)] }
-    defaultGame = { objects = [] }
-
+{-- Game Model ---------------------------------------------------------------
 ------------------------------------------------------------------------------}
 
 type GameColor = Red | Green | Blue
@@ -91,7 +73,7 @@ makeLevel : List Box -> List Goal -> List Wall -> Dimensions -> Level
 makeLevel boxes goals walls dimensions =
     {boxes = boxes, goals = goals, walls = walls, dimensions = dimensions}
 
-type alias GameState =
+type alias LevelState =
     { boxes : List Box
     , goals : List Goal
     , walls : List Wall
@@ -101,6 +83,13 @@ type alias GameState =
 
 still : Direction
 still = { dx = 0, dy = 0}
+
+type alias LevelId = Int
+
+type GameState = LoadLevel LevelId | PlayingLevel LevelState | GameError String
+
+{-- JSON definition ----------------------------------------------------------
+------------------------------------------------------------------------------}
 
 levelString : String
 levelString = "{\"boxes\": [{\"x\": 3, \"y\": 5, \"color\": \"red\"}], \"goals\": [{\"x\" : 6, \"y\": 1, \"color\": \"green\"}], \"walls\": [{\"x\" : 2, \"y\": 3}], \"dimensions\": {\"width\": 10, \"height\": 20}}"
@@ -143,29 +132,25 @@ levelDecoder = Json.object4 makeLevel
                ("walls" := Json.list wallDecoder)
                ("dimensions" := dimensionsDecoder)
 
+{-- Starting conditions ------------------------------------------------------
+------------------------------------------------------------------------------}
+
 level : Result String Level
 level = Json.decodeString levelDecoder levelString
         
-defaultGame : Result String GameState
-defaultGame = case level of
-                Ok l -> Ok
-                        { boxes = l.boxes
-                        , goals = l.goals
-                        , walls = l.walls
-                        , dimensions = l.dimensions
-                        , direction = still
-                        , frame = numFrames - 1}
-                Err msg -> Err msg
+defaultGame : GameState
+-- defaultGame = case level of
+--                 Ok l -> PlayingLevel
+--                          { boxes = l.boxes
+--                          , goals = l.goals
+--                          , walls = l.walls
+--                          , dimensions = l.dimensions
+--                          , direction = still
+--                          , frame = numFrames - 1}
+--                 Err msg -> GameError msg
+defaultGame = LoadLevel 1
 
-
-{-- Part 3: Update the game ---------------------------------------------------
-
-How does the game step from one state to another based on user input?
-
-Task: redefine `stepGame` to use the UserInput and GameState
-      you defined in parts 1 and 2. Maybe use some helper functions
-      to break up the work, stepping smaller parts of the game.
-
+{-- Update the game ----------------------------------------------------------
 ------------------------------------------------------------------------------}
 
 numFrames = 8
@@ -189,24 +174,24 @@ reachedGoal goals box = goals
                       |> List.map .color
                       |> List.member box.color
 
-determineBoxAction : GameState -> Box -> List BoxAction
-determineBoxAction gameState box =
-    let movedBox = moveBox gameState.direction box
-    in if | reachedGoal gameState.goals box -> [BoxDisappear]
-          | not <| inBounds gameState.dimensions movedBox -> []
-          | not <| clearOfPositioned gameState.walls movedBox -> []
-          | not <| clearOfPositioned gameState.boxes movedBox -> []
+determineBoxAction : LevelState -> Box -> List BoxAction
+determineBoxAction levelState box =
+    let movedBox = moveBox levelState.direction box
+    in if | reachedGoal levelState.goals box -> [BoxDisappear]
+          | not <| inBounds levelState.dimensions movedBox -> []
+          | not <| clearOfPositioned levelState.walls movedBox -> []
+          | not <| clearOfPositioned levelState.boxes movedBox -> []
           | otherwise -> [BoxMove]
 
-tagBoxAction : GameState -> Box -> Box
-tagBoxAction gameState box = { box | boxActions <- determineBoxAction gameState box}
+tagBoxAction : LevelState -> Box -> Box
+tagBoxAction levelState box = { box | boxActions <- determineBoxAction levelState box}
 
-determineGoalAction : GameState -> Goal -> List GoalAction
-determineGoalAction gameState goal =
-    if reachedGoal gameState.boxes goal then [GoalDisappear] else []
+determineGoalAction : LevelState -> Goal -> List GoalAction
+determineGoalAction levelState goal =
+    if reachedGoal levelState.boxes goal then [GoalDisappear] else []
 
-tagGoalAction : GameState -> Goal -> Goal
-tagGoalAction gameState goal = { goal | goalActions <- determineGoalAction gameState goal}
+tagGoalAction : LevelState -> Goal -> Goal
+tagGoalAction levelState goal = { goal | goalActions <- determineGoalAction levelState goal}
        
 moveBox : Direction -> Box -> Box
 moveBox {dx,dy} ({x,y} as box) =
@@ -216,53 +201,51 @@ moveBox {dx,dy} ({x,y} as box) =
 comp : (a -> Bool) -> a -> Bool
 comp f x = not (f x)
 
-determineActions : GameState -> GameState
-determineActions gameState =
-    { gameState | boxes <- List.map (tagBoxAction gameState) gameState.boxes,
-                  goals <- List.map (tagGoalAction gameState) gameState.goals}
+determineActions : LevelState -> LevelState
+determineActions levelState =
+    { levelState | boxes <- List.map (tagBoxAction levelState) levelState.boxes,
+                  goals <- List.map (tagGoalAction levelState) levelState.goals}
 
-applyBoxActions : GameState -> GameState
-applyBoxActions gameState =
-    let remaining = List.filter (comp (List.member BoxDisappear) << .boxActions) gameState.boxes
+applyBoxActions : LevelState -> LevelState
+applyBoxActions levelState =
+    let remaining = List.filter (comp (List.member BoxDisappear) << .boxActions) levelState.boxes
         mobile = List.filter (List.member BoxMove << .boxActions) remaining
         immobile = List.filter ((List.member BoxMove << .boxActions) |> comp) remaining
-    in {gameState | boxes <- immobile ++ List.map (moveBox gameState.direction) mobile,
-                    direction <- if List.isEmpty mobile then still else gameState.direction}
+    in {levelState | boxes <- immobile ++ List.map (moveBox levelState.direction) mobile,
+                    direction <- if List.isEmpty mobile then still else levelState.direction}
 
-applyGoalActions : GameState -> GameState
-applyGoalActions gameState =
-    {gameState | goals <- List.filter (comp (List.member GoalDisappear) << .goalActions) gameState.goals}
+applyGoalActions : LevelState -> LevelState
+applyGoalActions levelState =
+    {levelState | goals <- List.filter (comp (List.member GoalDisappear) << .goalActions) levelState.goals}
 
-applyActions : GameState -> GameState
-applyActions gameState = gameState |> applyBoxActions |> applyGoalActions
+applyActions : LevelState -> LevelState
+applyActions levelState = levelState |> applyBoxActions |> applyGoalActions
 
-tryChangeDirection : UserInput -> GameState -> GameState
-tryChangeDirection input gameState =
-    if (gameState.direction == still)
-      then { gameState | direction <- input }
-      else gameState
+tryChangeDirection : UserInput -> LevelState -> LevelState
+tryChangeDirection input levelState =
+    if (levelState.direction == still)
+      then { levelState | direction <- input }
+      else levelState
 
-stepFrame : GameState -> GameState
-stepFrame gameState =
-    if gameState.direction == still
-    then gameState
-    else { gameState | frame <- (gameState.frame + 1) % numFrames}
+stepFrame : LevelState -> LevelState
+stepFrame levelState =
+    if levelState.direction == still
+    then levelState
+    else { levelState | frame <- (levelState.frame + 1) % numFrames}
 
-stepGame : Input -> GameState -> GameState
-stepGame input gameState =
+stepLevel : Input -> LevelState -> LevelState
+stepLevel input levelState =
     case input of
-      TimeDelta _ -> if gameState.frame == numFrames - 1 then applyActions gameState |> determineActions else gameState |> stepFrame
-      UserAction userInput -> gameState |> tryChangeDirection userInput |> determineActions
+      TimeDelta _ -> if levelState.frame == numFrames - 1 then applyActions levelState |> determineActions else levelState |> stepFrame
+      UserAction userInput -> levelState |> tryChangeDirection userInput |> determineActions
 
-stepResultGame : Input -> Result String GameState -> Result String GameState
-stepResultGame input = Result.map (stepGame input)
+stepGameState : Input -> GameState -> GameState
+stepGameState input gameState = case gameState of
+                                  LoadLevel x -> LoadLevel x
+                                  PlayingLevel lvl -> PlayingLevel <| stepLevel input lvl
+                                  GameError msg -> GameError msg
 
-{-- Part 4: Display the game --------------------------------------------------
-
-How should the GameState be displayed to the user?
-
-Task: redefine `display` to use the GameState you defined in part 2.
-
+{-- Display the game ---------------------------------------------------------
 ------------------------------------------------------------------------------}
 
 gameDimensions : (Int,Int)
@@ -298,48 +281,68 @@ displayBox cellDim box = cellDim |> irect |> filled (dispColor box.color) |> mov
 tweenVec {dx,dy} (cellWidth,cellHeight) frame =
     (dx * cellWidth * frame // numFrames, dy * cellHeight * frame // numFrames) |> tupFloat
 
-tweenBox cellDim box gameState element =
+tweenBox cellDim box levelState element =
     if List.member BoxMove box.boxActions
-    then move (tweenVec gameState.direction cellDim gameState.frame) element
+    then move (tweenVec levelState.direction cellDim levelState.frame) element
     else element
 
 displayWall cellDim wall = cellDim |> irect |> filled wallColor |> move (cellPosition cellDim wall |> tupFloat)
 
 displayGoal cellDim goal = cellDim |> tupFloat |> uncurry oval |> filled (dispColor goal.color) |> move (cellPosition cellDim goal |> tupFloat)
 
-displayGame : (Int,Int) -> GameState -> Element
-displayGame (w,h) gameState =
-    let cellDim = cellDimensions gameState.dimensions
+displayGame : (Int,Int) -> LevelState -> Element
+displayGame (w,h) levelState =
+    let cellDim = cellDimensions levelState.dimensions
     in container w h middle <|
        collage gameWidth gameHeight
                    ([ gameDimensions |> irect |> filled backgroundColor]
-                    ++ List.map (\ b -> displayBox cellDim b |> tweenBox cellDim b gameState) gameState.boxes
-                    ++ List.map (displayWall cellDim) gameState.walls
-                    ++ List.map (displayGoal cellDim) gameState.goals)
+                    ++ List.map (\ b -> displayBox cellDim b |> tweenBox cellDim b levelState) levelState.boxes
+                    ++ List.map (displayWall cellDim) levelState.walls
+                    ++ List.map (displayGoal cellDim) levelState.goals)
 
-display : (Int,Int) -> Result String GameState -> Element
--- display (w,h) gameState =
---     show gameState
-display dim gameResultState =
-    case gameResultState of
-      Ok gameState -> displayGame dim gameState
-      Err msg -> show msg
+display : (Int,Int) -> GameState -> Element
+display dim gameState =
+    case gameState of
+      LoadLevel id -> show <| "Should load level " ++ (toString id)
+      PlayingLevel levelState -> displayGame dim levelState
+      GameError msg -> show msg
 
-{-- That's all folks! ---------------------------------------------------------
+{-- Rest urls ----------------------------------------------------------------
+------------------------------------------------------------------------------}
 
-The following code puts it all together and shows it on screen.
+levelUrl : LevelId -> String
+levelUrl id = Http.url ":3000/levels/" [("id", toString id)]
 
+{-- Wire up level querying ---------------------------------------------------
+------------------------------------------------------------------------------}
+
+currentLevel : Signal.Mailbox Level
+currentLevel = Signal.mailbox {boxes = [], walls = [], goals = [], dimensions = {dimx = 0, dimy = 0}}
+
+port queryLevel : Signal (Task Http.Error ())
+port queryLevel =
+    levelQuery.signal
+        |> Signal.map getLevel
+        |> Signal.map (\task -> task `andThen` Signal.send currentLevel.address)
+
+levelQuery : Signal.Mailbox LevelId
+levelQuery = Signal.mailbox 0
+
+getLevel : Int -> Task Http.Error Level
+getLevel id = Http.get levelDecoder (levelUrl id)
+
+{-- Main signals -------------------------------------------------------------
 ------------------------------------------------------------------------------}
 
 delta : Signal Float
 delta = Time.fps 30
 
 input : Signal Input
-input = Signal.merge (TimeDelta <~ delta) (UserAction <~ userInput)
+input = Signal.mergeMany [(TimeDelta <~ delta), (UserAction <~ userInput), (LevelLoaded <~ currentLevel.signal)]
 
-gameState : Signal (Result String GameState)
-gameState =
-    Signal.foldp stepResultGame defaultGame input
+levelState : Signal GameState
+levelState =
+    Signal.foldp stepGameState defaultGame input
 
 main : Signal Element
-main = display <~ Window.dimensions ~ gameState
+main = display <~ Window.dimensions ~ levelState
