@@ -139,19 +139,18 @@ level : Result String Level
 level = Json.decodeString levelDecoder levelString
         
 defaultGame : GameState
--- defaultGame = case level of
---                 Ok l -> PlayingLevel
---                          { boxes = l.boxes
---                          , goals = l.goals
---                          , walls = l.walls
---                          , dimensions = l.dimensions
---                          , direction = still
---                          , frame = numFrames - 1}
---                 Err msg -> GameError msg
-defaultGame = LoadLevel 1
+defaultGame = LoadLevel 0
 
 {-- Update the game ----------------------------------------------------------
 ------------------------------------------------------------------------------}
+
+loadLevel : Level -> LevelState
+loadLevel l = { boxes = l.boxes
+              , goals = l.goals
+              , walls = l.walls
+              , dimensions = l.dimensions
+              , direction = still
+              , frame = numFrames - 1}
 
 numFrames = 8
 
@@ -239,9 +238,16 @@ stepLevel input levelState =
       TimeDelta _ -> if levelState.frame == numFrames - 1 then applyActions levelState |> determineActions else levelState |> stepFrame
       UserAction userInput -> levelState |> tryChangeDirection userInput |> determineActions
 
+checkLevelLoaded : Input -> GameState -> GameState
+checkLevelLoaded input gameState =
+    case input of
+      TimeDelta _ -> gameState
+      UserAction _ -> gameState
+      LevelLoaded lvl -> PlayingLevel <| loadLevel lvl
+
 stepGameState : Input -> GameState -> GameState
 stepGameState input gameState = case gameState of
-                                  LoadLevel x -> LoadLevel x
+                                  LoadLevel x -> checkLevelLoaded input gameState
                                   PlayingLevel lvl -> PlayingLevel <| stepLevel input lvl
                                   GameError msg -> GameError msg
 
@@ -311,7 +317,7 @@ display dim gameState =
 ------------------------------------------------------------------------------}
 
 levelUrl : LevelId -> String
-levelUrl id = Http.url ":3000/levels/" [("id", toString id)]
+levelUrl id = Http.url "/levels/" [("id", toString id)]
 
 {-- Wire up level querying ---------------------------------------------------
 ------------------------------------------------------------------------------}
@@ -338,7 +344,9 @@ delta : Signal Float
 delta = Time.fps 30
 
 input : Signal Input
-input = Signal.mergeMany [(TimeDelta <~ delta), (UserAction <~ userInput), (LevelLoaded <~ currentLevel.signal)]
+input = Signal.mergeMany [ (TimeDelta <~ delta)
+                         , (UserAction <~ userInput)
+                         , (LevelLoaded <~ currentLevel.signal)]
 
 levelState : Signal GameState
 levelState =

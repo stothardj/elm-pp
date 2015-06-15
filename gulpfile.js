@@ -7,6 +7,10 @@ gulp.task('elm-init', elm.init);
 gulp.task('elm', ['elm-init'], function() {
     return gulp.src('src/*.elm')
         .pipe(elm())
+        .on('error', function(err) {
+            console.log(err);
+            this.emit('end');
+        })
         .pipe(gulp.dest('public/'));
 });
 
@@ -15,7 +19,7 @@ gulp.task('serve', function() {
 });
 
 gulp.task('watch', function() {
-    gulp.watch('src/*.elm', ['elm'])
+    gulp.watch('src/*.elm', ['elm']);
 });
 
 gulp.task('default', ['watch', 'serve'], function() {});

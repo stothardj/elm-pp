@@ -16,7 +16,7 @@ var levels = [{ boxes: [{x: 5, y: 3, color: "red"},
 
 app.get('/levels', function (req, res) {
     var index = parseInt(req.query.id);
-    res.send(JSON.stringify(levels[index]))
+    res.send(JSON.stringify(levels[index]));
 })
 
 app.use(express.static('public'))
