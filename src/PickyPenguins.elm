@@ -226,10 +226,20 @@ stepFrame levelState =
     then levelState
     else { levelState | frame <- (levelState.frame + 1) % numFrames}
 
+isGameOver : LevelState -> Bool
+isGameOver = .goals >> List.isEmpty
+
+timeUpdate : LevelState -> GameState
+timeUpdate levelState =
+    let newState = applyActions levelState
+    in if isGameOver newState
+       then LoadLevel 1
+       else newState |> determineActions |> stepFrame |> PlayingLevel 
+
 stepLevel : Input -> LevelState -> GameState
 stepLevel input levelState =
     case input of
-      TimeDelta _ -> PlayingLevel (if levelState.frame == numFrames - 1 then applyActions levelState |> determineActions else levelState |> stepFrame)
+      TimeDelta _ -> if levelState.frame == numFrames - 1 then timeUpdate levelState else PlayingLevel <| stepFrame levelState
       UserAction userInput -> PlayingLevel (levelState |> tryChangeDirection userInput |> determineActions)
       LevelLoaded _ _ -> PlayingLevel levelState
 
