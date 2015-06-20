@@ -19,7 +19,7 @@ type alias UserInput =
 userInput : Signal UserInput
 userInput = UserInput <~ (.x <~ Keyboard.arrows) ~ (.y <~ Keyboard.arrows)
 
-type Input = TimeDelta Float | UserAction UserInput | LevelLoaded Level
+type Input = TimeDelta Float | UserAction UserInput | LevelLoaded LevelId Level
 
 {-- Game Model ---------------------------------------------------------------
 ------------------------------------------------------------------------------}
@@ -91,9 +91,6 @@ type GameState = LoadLevel LevelId | PlayingLevel LevelState | GameError String
 {-- JSON definition ----------------------------------------------------------
 ------------------------------------------------------------------------------}
 
-levelString : String
-levelString = "{\"boxes\": [{\"x\": 3, \"y\": 5, \"color\": \"red\"}], \"goals\": [{\"x\" : 6, \"y\": 1, \"color\": \"green\"}], \"walls\": [{\"x\" : 2, \"y\": 3}], \"dimensions\": {\"width\": 10, \"height\": 20}}"
-
 stringToColor : String -> GameColor
 stringToColor s =
     if | s == "red" -> Red
@@ -134,9 +131,6 @@ levelDecoder = Json.object4 makeLevel
 
 {-- Starting conditions ------------------------------------------------------
 ------------------------------------------------------------------------------}
-
-level : Result String Level
-level = Json.decodeString levelDecoder levelString
         
 defaultGame : GameState
 defaultGame = LoadLevel 0
@@ -232,23 +226,24 @@ stepFrame levelState =
     then levelState
     else { levelState | frame <- (levelState.frame + 1) % numFrames}
 
-stepLevel : Input -> LevelState -> LevelState
+stepLevel : Input -> LevelState -> GameState
 stepLevel input levelState =
     case input of
-      TimeDelta _ -> if levelState.frame == numFrames - 1 then applyActions levelState |> determineActions else levelState |> stepFrame
-      UserAction userInput -> levelState |> tryChangeDirection userInput |> determineActions
+      TimeDelta _ -> PlayingLevel (if levelState.frame == numFrames - 1 then applyActions levelState |> determineActions else levelState |> stepFrame)
+      UserAction userInput -> PlayingLevel (levelState |> tryChangeDirection userInput |> determineActions)
+      LevelLoaded _ _ -> PlayingLevel levelState
 
 checkLevelLoaded : Input -> GameState -> GameState
 checkLevelLoaded input gameState =
     case input of
       TimeDelta _ -> gameState
       UserAction _ -> gameState
-      LevelLoaded lvl -> PlayingLevel <| loadLevel lvl
+      LevelLoaded _ lvl -> PlayingLevel <| loadLevel lvl
 
 stepGameState : Input -> GameState -> GameState
 stepGameState input gameState = case gameState of
                                   LoadLevel x -> checkLevelLoaded input gameState
-                                  PlayingLevel lvl -> PlayingLevel <| stepLevel input lvl
+                                  PlayingLevel lvl -> stepLevel input lvl
                                   GameError msg -> GameError msg
 
 {-- Display the game ---------------------------------------------------------
@@ -313,6 +308,9 @@ display dim gameState =
       PlayingLevel levelState -> displayGame dim levelState
       GameError msg -> show msg
 
+-- display dim gameState =
+--     show gameState
+
 {-- Rest urls ----------------------------------------------------------------
 ------------------------------------------------------------------------------}
 
@@ -334,8 +332,23 @@ port queryLevel =
 levelQuery : Signal.Mailbox LevelId
 levelQuery = Signal.mailbox 0
 
-getLevel : Int -> Task Http.Error Level
+getLevel : LevelId -> Task Http.Error Level
 getLevel id = Http.get levelDecoder (levelUrl id)
+
+maybeLevelId : GameState -> Maybe LevelId
+maybeLevelId gameState =
+    case gameState of
+      LoadLevel id -> Just id
+      _ -> Nothing
+
+gameNewLevel : Signal LevelId
+gameNewLevel = levelState
+             |> Signal.filterMap maybeLevelId 0
+             |> Signal.dropRepeats
+
+port sendToQuery : Signal (Task LevelId ())
+port sendToQuery =
+    Signal.send levelQuery.address <~ gameNewLevel
 
 {-- Main signals -------------------------------------------------------------
 ------------------------------------------------------------------------------}
@@ -343,10 +356,15 @@ getLevel id = Http.get levelDecoder (levelUrl id)
 delta : Signal Float
 delta = Time.fps 30
 
+loadComplete : Signal Input
+loadComplete =
+    Signal.sampleOn currentLevel.signal
+          <| LevelLoaded <~ levelQuery.signal ~ currentLevel.signal
+
 input : Signal Input
 input = Signal.mergeMany [ (TimeDelta <~ delta)
                          , (UserAction <~ userInput)
-                         , (LevelLoaded <~ currentLevel.signal)]
+                         , loadComplete]
 
 levelState : Signal GameState
 levelState =
