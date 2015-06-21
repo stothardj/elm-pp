@@ -261,14 +261,12 @@ stepGameState input gameState = case gameState of
 {-- Display the game ---------------------------------------------------------
 ------------------------------------------------------------------------------}
 
-gameDimensions : (Int,Int)
-gameDimensions = (500,400)
-(gameWidth,gameHeight) = gameDimensions
-(halfWidth,halfHeight) = (gameWidth // 2, gameHeight // 2)
+type alias CellInfo =
+    { screenDimX : Float
+    , screenDimY : Float
+    , cellDimX : Float
+    , cellDimY : Float}
 
-tupFloat : (Int,Int) -> (Float,Float)
-tupFloat (a,b) = (toFloat a, toFloat b)
-                         
 dispColor : GameColor -> Color
 dispColor color = case color of
                     Red -> rgb 255 0 0
@@ -281,37 +279,61 @@ backgroundColor = rgb 50 80 100
 wallColor : Color
 wallColor = rgb 255 255 255
 
-irect = tupFloat >> uncurry rect
+cellDimensions : (Int,Int) -> Dimensions -> (Float,Float)
+cellDimensions (w,h) {dimx,dimy} =
+    let fw = toFloat w
+        fh = toFloat h
+        fDimX = toFloat dimx
+        fDimY = toFloat dimy
+    in (fw / fDimX, fh / fDimY)
 
-cellDimensions : Dimensions -> (Int,Int)
-cellDimensions {dimx,dimy} = (gameWidth // dimx, gameHeight // dimy)
+cellPosition : CellInfo -> {a | x : Int, y : Int} -> (Float,Float)
+cellPosition {cellDimX, cellDimY, screenDimX, screenDimY} {x,y} =
+    let fx = toFloat x
+        fy = toFloat y
+    in (fx * cellDimX - screenDimX / 2 + cellDimX / 2, fy * cellDimY - screenDimY / 2 + cellDimY / 2)
 
-cellPosition (cellWidth,cellHeight) {x,y} =
-    (x * cellWidth - halfWidth + cellWidth // 2, y * cellHeight - halfHeight + cellHeight // 2)
+displayBox : CellInfo -> Box -> Form
+displayBox cell box = rect cell.cellDimX cell.cellDimY |> filled (dispColor box.color) |> move (cellPosition cell box)
 
-displayBox cellDim box = cellDim |> irect |> filled (dispColor box.color) |> move (cellPosition cellDim box |> tupFloat)
+tweenVec : Direction -> CellInfo -> Int -> (Float,Float)
+tweenVec {dx,dy} cell frame =
+    let fdx = toFloat dx
+        fdy = toFloat dy
+        fframe = toFloat frame
+        fNumFrames = toFloat numFrames
+    in (fdx * cell.cellDimX * fframe / fNumFrames, fdy * cell.cellDimY * fframe / fNumFrames)
 
-tweenVec {dx,dy} (cellWidth,cellHeight) frame =
-    (dx * cellWidth * frame // numFrames, dy * cellHeight * frame // numFrames) |> tupFloat
-
-tweenBox cellDim box levelState element =
+tweenBox : CellInfo -> Box -> LevelState -> Form -> Form
+tweenBox cell box levelState element =
     if List.member BoxMove box.boxActions
-    then move (tweenVec levelState.direction cellDim levelState.frame) element
+    then move (tweenVec levelState.direction cell levelState.frame) element
     else element
 
-displayWall cellDim wall = cellDim |> irect |> filled wallColor |> move (cellPosition cellDim wall |> tupFloat)
+displayWall : CellInfo -> Wall -> Form
+displayWall cell wall = rect cell.cellDimX cell.cellDimY |> filled wallColor |> move (cellPosition cell wall)
 
-displayGoal cellDim goal = cellDim |> tupFloat |> uncurry oval |> filled (dispColor goal.color) |> move (cellPosition cellDim goal |> tupFloat)
+displayGoal : CellInfo -> Goal -> Form
+displayGoal cell goal = oval cell.cellDimX cell.cellDimY |> filled (dispColor goal.color) |> move (cellPosition cell goal)
+
+foreground : (Int,Int) -> LevelState -> Element
+foreground (w,h) levelState =
+    let (cellWidth,cellHeight) = cellDimensions (w,h) levelState.dimensions
+        cell =
+            { cellDimX = cellWidth
+            , cellDimY = cellHeight
+            , screenDimX = toFloat w
+            , screenDimY = toFloat h}
+    in collage w h <|
+       List.concat [ List.map (\ b -> displayBox cell b |> tweenBox cell b levelState) levelState.boxes
+                   , List.map (displayWall cell) levelState.walls
+                   , List.map (displayGoal cell) levelState.goals]
 
 displayGame : (Int,Int) -> LevelState -> Element
 displayGame (w,h) levelState =
-    let cellDim = cellDimensions levelState.dimensions
-    in container w h middle <|
-       collage gameWidth gameHeight
-                   ([ gameDimensions |> irect |> filled backgroundColor]
-                    ++ List.map (\ b -> displayBox cellDim b |> tweenBox cellDim b levelState) levelState.boxes
-                    ++ List.map (displayWall cellDim) levelState.walls
-                    ++ List.map (displayGoal cellDim) levelState.goals)
+    collage w h
+                [ rect (toFloat w) (toFloat h) |> filled backgroundColor
+                , (foreground (w,h) levelState |> toForm)]
 
 display : (Int,Int) -> GameState -> Element
 display dim gameState =

@@ -1,17 +1,11 @@
 <html>
   <head>
-    <title>Elm PP</title>
-    <style>html, head, body { padding:0; margin:0; }
-      body { font-family: calibri, helvetica, arial, sans-serif; }
-      a:link { text-decoration: none; color: rgb(15,102,230); }
-      a:visited { text-decoration: none; }
-      a:active { text-decoration: none; }
-      a:hover { text-decoration: underline; color: rgb(234,21,122); }
-      html,body { height: 100%; margin: 0px; }
-    </style>
+    <title>Picky Penguins</title>
     <script src="PickyPenguins.js"></script>
   </head>
   <body>
-    <script>var runningElmModule = Elm.fullscreen(Elm.Main);</script>
+    <h1>Picky Penguins</h1>
+    <div id="game" style="width: 700px; height: 600px; border: solid;"></div>
+    <script>Elm.embed(Elm.Main, document.getElementById('game'));</script>
   </body>
 </html>
