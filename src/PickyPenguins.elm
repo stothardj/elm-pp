@@ -79,7 +79,8 @@ type alias LevelState =
     , walls : List Wall
     , direction : Direction
     , dimensions : Dimensions
-    , frame : Int}
+    , frame : Int
+    , id : LevelId}
 
 still : Direction
 still = { dx = 0, dy = 0}
@@ -138,13 +139,14 @@ defaultGame = LoadLevel 0
 {-- Update the game ----------------------------------------------------------
 ------------------------------------------------------------------------------}
 
-loadLevel : Level -> LevelState
-loadLevel l = { boxes = l.boxes
+loadLevel : LevelId -> Level -> LevelState
+loadLevel id l = { boxes = l.boxes
               , goals = l.goals
               , walls = l.walls
               , dimensions = l.dimensions
               , direction = still
-              , frame = numFrames - 1}
+              , frame = numFrames - 1
+              , id = id}
 
 numFrames = 8
 
@@ -233,7 +235,7 @@ timeUpdate : LevelState -> GameState
 timeUpdate levelState =
     let newState = applyActions levelState
     in if isGameOver newState
-       then LoadLevel 1
+       then LoadLevel (levelState.id + 1)
        else newState |> determineActions |> stepFrame |> PlayingLevel 
 
 stepLevel : Input -> LevelState -> GameState
@@ -248,7 +250,7 @@ checkLevelLoaded input gameState =
     case input of
       TimeDelta _ -> gameState
       UserAction _ -> gameState
-      LevelLoaded _ lvl -> PlayingLevel <| loadLevel lvl
+      LevelLoaded id lvl -> PlayingLevel <| loadLevel id lvl
 
 stepGameState : Input -> GameState -> GameState
 stepGameState input gameState = case gameState of

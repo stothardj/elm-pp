@@ -8,9 +8,14 @@ var levels = [{ boxes: [{x: 5, y: 3, color: "red"},
 		dimensions: {width: 10, height: 10},
 	      },
 	      { boxes: [{x: 1, y: 3, color: "green"}],
-		goals: [{x: 2, y: 6, color: "green"}],
+		goals: [{x: 1, y: 1, color: "green"}],
 		walls: [{x: 7, y: 3}],
 		dimensions: {width: 10, height: 12},
+	      },
+              { boxes: [{x: 1, y: 3, color: "blue"}],
+		goals: [{x: 0, y: 1, color: "blue"}],
+		walls: [{x: 2, y: 3}, {x: 3, y: 3}],
+		dimensions: {width: 5, height: 4},
 	      }
 	     ];
 
