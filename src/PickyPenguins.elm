@@ -219,7 +219,7 @@ applyActions levelState = levelState |> applyBoxActions |> applyGoalActions
 tryChangeDirection : UserInput -> LevelState -> LevelState
 tryChangeDirection input levelState =
     if (levelState.direction == still)
-      then { levelState | direction <- input }
+      then { levelState | direction <- input, frame <- 0 }
       else levelState
 
 stepFrame : LevelState -> LevelState
@@ -388,7 +388,7 @@ port sendToQuery =
 ------------------------------------------------------------------------------}
 
 delta : Signal Float
-delta = Time.fps 30
+delta = Time.fps 60
 
 loadComplete : Signal Input
 loadComplete =
