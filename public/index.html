@@ -1,11 +1,16 @@
 <html>
   <head>
     <title>Picky Penguins</title>
+    <link rel="stylesheet" type="text/css" href="style.css">
+    <script src="hammer.min.js"></script>
     <script src="PickyPenguins.js"></script>
+    <script src="HammerInterop.js"></script>
   </head>
   <body>
-    <h1>Picky Penguins</h1>
-    <div id="game" style="width: 700px; height: 600px; border: solid;"></div>
-    <script>Elm.embed(Elm.Main, document.getElementById('game'));</script>
+    <div id="game"></div>
+    <script>
+      var picky = Elm.embed(Elm.Main, document.getElementById('game'), { panDirection: {dx: 0, dy: 0}} );
+      bindGestures(document.getElementById('game'), picky);
+    </script>
   </body>
 </html>
