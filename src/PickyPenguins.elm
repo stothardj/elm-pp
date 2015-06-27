@@ -12,14 +12,6 @@ import Task exposing (Task, andThen)
 {-- Input Model --------------------------------------------------------------
 ------------------------------------------------------------------------------}
 
-orInt : Int -> Int -> Int
-orInt a b = if a /= 0 then a else b
-
-orDirection : Direction -> Direction -> Direction
-orDirection a b =
-    { dx = orInt a.dx b.dx
-    , dy = orInt a.dy b.dy }
-
 type alias UserInput =
     { dx : Int
     , dy : Int}
@@ -28,7 +20,7 @@ keyboardInput : Signal Direction
 keyboardInput = Direction <~ (.x <~ Keyboard.arrows) ~ (.y <~ Keyboard.arrows)
 
 userInput : Signal UserInput
-userInput = orDirection <~ keyboardInput ~ panDirection
+userInput = Signal.merge keyboardInput panDirection
 
 type Input = TimeDelta Float | UserAction UserInput | LevelLoaded LevelId Level
 
